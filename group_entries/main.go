@@ -120,18 +120,22 @@ func init() {
 
 func main() {
 	flag.Parse()
-	if flag.NArg() < 1 {
-		log.Fatal("Missing filename")
-	}
 	if percent_threshold < 0.0 || percent_threshold > 1.0 {
 		log.Fatal("Threshold must be between 0.0 and 1.0")
 	}
 	// TODO - process multiple files
-	fh, err := os.Open(flag.Args()[0])
-	if err != nil {
-		log.Fatal(err)
+	var fh *os.File
+	var err error
+	if flag.NArg() >= 1 {
+		fh, err = os.Open(flag.Args()[0])
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer fh.Close()
+	} else {
+		fh = os.Stdin
 	}
-	defer fh.Close()
+
 	groups := process(fh)
 	sort.Sort(ByLength(groups))
 	for i := range groups {
