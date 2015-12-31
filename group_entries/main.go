@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -18,7 +20,8 @@ var separator_re = regexp.MustCompile("[!\"#$%&'()*+,-./:;<=>?@[\\]\\\\^_`{|}~\t
 // How similar log lines have to be for them to be grouped together. Expressed
 // as a fraction of the number of tokens (e.g. 0.8 would be 80% of tokens must
 // match)
-var percent_threshold = 0.6
+var percent_threshold = 0.0
+var reverse_sort = false
 
 func split_into_tokens(line string) []string {
 	// Splits at whitespace or symbols. Includes the symbol at the end of each
@@ -75,7 +78,6 @@ func process(fh *os.File) (groups [][][]string) {
 func generate_wildcards(group [][]string) []string {
 	// Takes a slice of split strings, and replaces any matching items with
 	// wildcards.
-	// TODO - preserve punctuation/whitespace when adding wildcards
 	wild_pattern := make([]string, len(group[0]), len(group[0]))
 	copy(wild_pattern, group[0])
 	for _, pattern := range group {
@@ -95,19 +97,47 @@ func generate_wildcards(group [][]string) []string {
 	return wild_pattern
 }
 
+// Sort groups by how many log lines are in the group
+type ByLength [][][]string
+
+func (s ByLength) Len() int {
+	return len(s)
+}
+func (s ByLength) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s ByLength) Less(i, j int) bool {
+	return len(s[i]) < len(s[j])
+}
+
+func init() {
+	log.SetFlags(0)
+	flag.Float64Var(&percent_threshold, "threshold", 0.8,
+		"Similarity threshold for log lines (0-1)")
+	flag.BoolVar(&reverse_sort, "reverse", false,
+		"Sort output in reverse order")
+}
+
 func main() {
-	log.SetFlags(log.Lshortfile)
-	if len(os.Args) < 2 {
+	flag.Parse()
+	if flag.NArg() < 1 {
 		log.Fatal("Missing filename")
-		os.Exit(1)
 	}
-	fh, err := os.Open(os.Args[1])
+	if percent_threshold < 0.0 || percent_threshold > 1.0 {
+		log.Fatal("Threshold must be between 0.0 and 1.0")
+	}
+	// TODO - process multiple files
+	fh, err := os.Open(flag.Args()[0])
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer fh.Close()
 	groups := process(fh)
+	sort.Sort(ByLength(groups))
 	for i := range groups {
+		if reverse_sort {
+			i = len(groups) - (i + 1)
+		}
 		fmt.Println(len(groups[i]), "\t", strings.Join(generate_wildcards(groups[i]), ""))
 	}
 }
