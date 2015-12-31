@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	ui "github.com/gizak/termui"
 )
 
 // Any text followed by a separator (symbols or whitespace)
@@ -22,6 +24,7 @@ var separator_re = regexp.MustCompile("[!\"#$%&'()*+,-./:;<=>?@[\\]\\\\^_`{|}~\t
 // match)
 var percent_threshold = 0.0
 var reverse_sort = false
+var non_interactive = false
 
 func split_into_tokens(line string) []string {
 	// Splits at whitespace or symbols. Includes the symbol at the end of each
@@ -97,6 +100,36 @@ func generate_wildcards(group [][]string) []string {
 	return wild_pattern
 }
 
+func renderGroup(group [][]string, color bool) string {
+	count := len(group)
+	with_wilds := generate_wildcards(group)
+	if color {
+		return fmt.Sprintf("[%v](fg-green)\t%v", count,
+			strings.Join(with_wilds, ""))
+	} else {
+		return fmt.Sprintf("%v\t%v", count, strings.Join(with_wilds, ""))
+	}
+}
+
+func scroll(box *ui.List, groupLength, x, y int, absolute bool) {
+	if absolute {
+		box.PaddingLeft = -x
+		box.PaddingTop = -y
+	} else {
+		box.PaddingLeft -= x
+		box.PaddingTop -= y
+	}
+	if box.PaddingTop < (box.Height - groupLength) {
+		box.PaddingTop = (box.Height - groupLength)
+	}
+	if box.PaddingTop > 0 {
+		box.PaddingTop = 0
+	}
+	if box.PaddingLeft > 0 {
+		box.PaddingLeft = 0
+	}
+}
+
 // Sort groups by how many log lines are in the group
 type ByLength [][][]string
 
@@ -115,7 +148,9 @@ func init() {
 	flag.Float64Var(&percent_threshold, "threshold", 0.8,
 		"Similarity threshold for log lines (0-1)")
 	flag.BoolVar(&reverse_sort, "reverse", false,
-		"Sort output in reverse order")
+		"Sort output in reverse order (non-interactive only)")
+	flag.BoolVar(&non_interactive, "noninteractive", false,
+		"Run in non-interactive mode (just print out grouped patterns)")
 }
 
 func main() {
@@ -123,6 +158,7 @@ func main() {
 	if percent_threshold < 0.0 || percent_threshold > 1.0 {
 		log.Fatal("Threshold must be between 0.0 and 1.0")
 	}
+
 	// TODO - process multiple files
 	var fh *os.File
 	var err error
@@ -137,11 +173,102 @@ func main() {
 	}
 
 	groups := process(fh)
-	sort.Sort(ByLength(groups))
-	for i := range groups {
-		if reverse_sort {
-			i = len(groups) - (i + 1)
+	if reverse_sort {
+		sort.Sort(sort.Reverse(ByLength(groups)))
+	} else {
+		sort.Sort(ByLength(groups))
+	}
+
+	// Simple printing (no interactive ui)
+	if non_interactive {
+		for i := range groups {
+			fmt.Println(renderGroup(groups[i], false))
 		}
-		fmt.Println(len(groups[i]), "\t", strings.Join(generate_wildcards(groups[i]), ""))
+	} else {
+		err := ui.Init()
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer ui.Close()
+		outBox := ui.NewList()
+		outBox.Border = false
+		items := make([]string, 0, len(groups))
+		for _, g := range groups {
+			items = append(items, renderGroup(g, true))
+		}
+		outBox.Items = items
+		outBox.Height = ui.TermHeight() - 2
+		helpBox := ui.NewPar("q:Quit  ^,v,<,>,pgup,pgdown,home,end:scroll")
+		helpBox.Height = 2
+		helpBox.BorderRight = false
+		helpBox.BorderBottom = false
+		helpBox.BorderLeft = false
+		ui.Body.AddRows(
+			ui.NewRow(ui.NewCol(12, 0, outBox)),
+			ui.NewRow(ui.NewCol(12, 0, helpBox)))
+		ui.Body.Align()
+		ui.Render(ui.Body)
+
+		ui.Handle("/sys/kbd/q", func(ui.Event) {
+			// Quit
+			ui.StopLoop()
+		})
+
+		ui.Handle("/sys/kbd/<up>", func(ui.Event) {
+			// Scroll up
+			scroll(outBox, len(groups), 0, -1, false)
+			ui.Render(ui.Body)
+		})
+
+		ui.Handle("/sys/kbd/<down>", func(ui.Event) {
+			// Scroll down
+			scroll(outBox, len(groups), 0, 1, false)
+			ui.Render(ui.Body)
+		})
+
+		ui.Handle("/sys/kbd/<previous>", func(ui.Event) {
+			// Scroll up quickly
+			scroll(outBox, len(groups), 0, -outBox.Height, false)
+			ui.Render(ui.Body)
+		})
+
+		ui.Handle("/sys/kbd/<next>", func(ui.Event) {
+			// Scroll down
+			scroll(outBox, len(groups), 0, outBox.Height, false)
+			ui.Render(ui.Body)
+		})
+
+		ui.Handle("/sys/kbd/<left>", func(ui.Event) {
+			// Scroll left
+			scroll(outBox, len(groups), -10, 0, false)
+			ui.Render(ui.Body)
+		})
+
+		ui.Handle("/sys/kbd/<right>", func(ui.Event) {
+			// Scroll right
+			scroll(outBox, len(groups), 10, 0, false)
+			ui.Render(ui.Body)
+		})
+
+		ui.Handle("/sys/kbd/<home>", func(ui.Event) {
+			// Reset current view
+			scroll(outBox, len(groups), 0, 0, true)
+			ui.Render(ui.Body)
+		})
+
+		ui.Handle("/sys/kbd/<end>", func(ui.Event) {
+			// Scroll to bottom
+			scroll(outBox, len(groups), 0, len(groups), true)
+			ui.Render(ui.Body)
+		})
+
+		ui.Handle("/sys/wnd/resize", func(e ui.Event) {
+			ui.Body.Width = ui.TermWidth()
+			outBox.Height = ui.TermHeight() - 3
+			ui.Body.Align()
+			ui.Render(ui.Body)
+		})
+
+		ui.Loop()
 	}
 }
