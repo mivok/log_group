@@ -19,6 +19,22 @@ var token_re = regexp.MustCompile(".*?([!\"#$%&'()*+,-./:;<=>?@[\\]\\\\^_`{|}~\t
 // Extracts a separator at the end of a token
 var separator_re = regexp.MustCompile("[!\"#$%&'()*+,-./:;<=>?@[\\]\\\\^_`{|}~\t\n\x0b\x0c\r ]+$")
 
+// Modes
+const (
+	MODE_LIST = iota
+	MODE_DETAILS
+	MODE_WILDCARD
+)
+
+type ViewState struct {
+	mode               int
+	groups             *[][][]string
+	selected_list_item int
+	list_items         *[]string
+}
+
+var viewState = ViewState{}
+
 // How similar log lines have to be for them to be grouped together. Expressed
 // as a fraction of the number of tokens (e.g. 0.8 would be 80% of tokens must
 // match)
@@ -78,7 +94,7 @@ func process(fh *os.File) (groups [][][]string) {
 	return groups
 }
 
-func generate_wildcards(group [][]string) []string {
+func generateWildcards(group [][]string) []string {
 	// Takes a slice of split strings, and replaces any matching items with
 	// wildcards.
 	wild_pattern := make([]string, len(group[0]), len(group[0]))
@@ -102,7 +118,7 @@ func generate_wildcards(group [][]string) []string {
 
 func renderGroup(group [][]string, color bool) string {
 	count := len(group)
-	with_wilds := generate_wildcards(group)
+	with_wilds := generateWildcards(group)
 	if color {
 		return fmt.Sprintf("[%v](fg-green)\t%v", count,
 			strings.Join(with_wilds, ""))
@@ -111,7 +127,7 @@ func renderGroup(group [][]string, color bool) string {
 	}
 }
 
-func scroll(box *ui.List, groupLength, x, y int, absolute bool) {
+func scroll(box *ui.List, x, y int, absolute bool) {
 	if absolute {
 		box.PaddingLeft = -x
 		box.PaddingTop = -y
@@ -119,8 +135,8 @@ func scroll(box *ui.List, groupLength, x, y int, absolute bool) {
 		box.PaddingLeft -= x
 		box.PaddingTop -= y
 	}
-	if box.PaddingTop < (box.Height - groupLength) {
-		box.PaddingTop = (box.Height - groupLength)
+	if box.PaddingTop < (box.Height - len(box.Items)) {
+		box.PaddingTop = (box.Height - len(box.Items))
 	}
 	if box.PaddingTop > 0 {
 		box.PaddingTop = 0
@@ -128,6 +144,33 @@ func scroll(box *ui.List, groupLength, x, y int, absolute bool) {
 	if box.PaddingLeft > 0 {
 		box.PaddingLeft = 0
 	}
+}
+
+func switchMode(newMode int, outBox *ui.List) {
+	if viewState.mode == newMode {
+		// Yay, nothing to do
+		return
+	}
+
+	if newMode == MODE_LIST {
+		outBox.Items = *viewState.list_items
+		scroll(outBox, 0, 0, true)
+	}
+
+	if newMode == MODE_DETAILS && viewState.mode == MODE_LIST {
+		// TODO - we should probably keep track of the selected index
+		// elsewhere, such as in viewState.
+		selected_index := 0 - outBox.PaddingTop
+		selected_group := (*viewState.groups)[selected_index]
+		details := make([]string, 0, len(selected_group))
+		for _, v := range selected_group {
+			details = append(details, strings.Join(v, ""))
+		}
+		outBox.Items = details
+		scroll(outBox, 0, 0, true)
+	}
+
+	viewState.mode = newMode
 }
 
 // Sort groups by how many log lines are in the group
@@ -173,7 +216,8 @@ func main() {
 	}
 
 	groups := process(fh)
-	if reverse_sort {
+	viewState.groups = &groups
+	if reverse_sort || !non_interactive {
 		sort.Sort(sort.Reverse(ByLength(groups)))
 	} else {
 		sort.Sort(ByLength(groups))
@@ -196,9 +240,10 @@ func main() {
 		for _, g := range groups {
 			items = append(items, renderGroup(g, true))
 		}
+		viewState.list_items = &items
 		outBox.Items = items
 		outBox.Height = ui.TermHeight() - 2
-		helpBox := ui.NewPar("q:Quit  ^,v,<,>,pgup,pgdown,home,end:scroll")
+		helpBox := ui.NewPar("q:Quit  ^,v,<,>,pgup,pgdown,home,end:scroll  enter:details  1-9:expand wildcard")
 		helpBox.Height = 2
 		helpBox.BorderRight = false
 		helpBox.BorderBottom = false
@@ -216,50 +261,66 @@ func main() {
 
 		ui.Handle("/sys/kbd/<up>", func(ui.Event) {
 			// Scroll up
-			scroll(outBox, len(groups), 0, -1, false)
+			scroll(outBox, 0, -1, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<down>", func(ui.Event) {
 			// Scroll down
-			scroll(outBox, len(groups), 0, 1, false)
+			scroll(outBox, 0, 1, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<previous>", func(ui.Event) {
 			// Scroll up quickly
-			scroll(outBox, len(groups), 0, -outBox.Height, false)
+			scroll(outBox, 0, -outBox.Height, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<next>", func(ui.Event) {
 			// Scroll down
-			scroll(outBox, len(groups), 0, outBox.Height, false)
+			scroll(outBox, 0, outBox.Height, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<left>", func(ui.Event) {
 			// Scroll left
-			scroll(outBox, len(groups), -10, 0, false)
+			scroll(outBox, -10, 0, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<right>", func(ui.Event) {
 			// Scroll right
-			scroll(outBox, len(groups), 10, 0, false)
+			scroll(outBox, 10, 0, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<home>", func(ui.Event) {
 			// Reset current view
-			scroll(outBox, len(groups), 0, 0, true)
+			scroll(outBox, 0, 0, true)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<end>", func(ui.Event) {
 			// Scroll to bottom
-			scroll(outBox, len(groups), 0, len(groups), true)
+			scroll(outBox, 0, len(outBox.Items), true)
 			ui.Render(ui.Body)
+		})
+
+		ui.Handle("/sys/kbd/<escape>", func(ui.Event) {
+			switchMode(MODE_LIST, outBox)
+			ui.Render(ui.Body)
+		})
+
+		ui.Handle("/sys/kbd/<enter>", func(ui.Event) {
+			switchMode(MODE_DETAILS, outBox)
+			ui.Render(ui.Body)
+		})
+
+		ui.Handle("/sys/kbd/", func(ui.Event) {
+			// Handle other keys - we're interested in 1-9 for wildcards
+			// TODO
+
 		})
 
 		ui.Handle("/sys/wnd/resize", func(e ui.Event) {
