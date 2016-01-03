@@ -5,6 +5,9 @@ package selection_list
 // - Don't use padding to do scrolling, just store the current scroll offset
 //   instead and start the text from that point.
 // - Implement wrapping (Overflow: wrap)
+// - Higlight the line all the way across by explicitly setting the relevant
+//   line on the screen using buf.Set() instead of relying on default fg/bg.
+//   Then we can override and not have to deal with the green.
 
 import (
 	ui "github.com/gizak/termui"
