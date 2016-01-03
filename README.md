@@ -3,7 +3,7 @@
 This repository contains a few simple command line tools for working with log
 files. The tools are:
 
-* group_entries - identifies similar lines in a log file and groups them
+* log_group - identifies similar lines in a log file and groups them
   together, replacing any differences with wildcards.
 
 ## Install instructions
