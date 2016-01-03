@@ -41,8 +41,8 @@ func (l *SelectionList) Scroll(x, y int, absolute bool) {
 		l.ScrollX += x
 		l.ScrollY += y
 	}
-	if l.ScrollY >= (len(l.Items) - l.Height) {
-		l.ScrollY = (len(l.Items) - l.Height - 1)
+	if l.ScrollY >= (len(l.Items) - l.InnerHeight()) {
+		l.ScrollY = (len(l.Items) - l.InnerHeight() - 1)
 	}
 	if l.ScrollY < 0 {
 		l.ScrollY = 0
@@ -73,8 +73,8 @@ func (l *SelectionList) SelectItem(count int, absolute bool) {
 	if l.ScrollY > l.SelectedItem {
 		l.ScrollY = l.SelectedItem
 	}
-	if l.ScrollY < l.SelectedItem+1-l.Height {
-		l.ScrollY = l.SelectedItem + 1 - l.Height
+	if l.ScrollY < l.SelectedItem+1-l.InnerHeight() {
+		l.ScrollY = l.SelectedItem + 1 - l.InnerHeight()
 	}
 }
 
