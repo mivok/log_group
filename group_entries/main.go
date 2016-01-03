@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	selection_list "github.com/mivok/logtools/group_entries/selection_list"
+	"github.com/mivok/logtools/selection_list"
 
 	ui "github.com/gizak/termui"
 )
