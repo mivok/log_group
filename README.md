@@ -5,6 +5,7 @@ files. The tools are:
 
 * log_group - identifies similar lines in a log file and groups them
   together, replacing any differences with wildcards.
+* log_multiline - combine multi-line log entries into one
 
 ## Install instructions
 
