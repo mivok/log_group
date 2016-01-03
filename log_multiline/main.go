@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-var prefix = "\\s+"
+var prefix = "^\\s+"
 var prefix_re *regexp.Regexp
 
 func process(fh *os.File) {
@@ -38,7 +38,7 @@ func init() {
 func main() {
 	flag.Parse()
 	var err error
-	prefix_re, err = regexp.Compile("^" + prefix)
+	prefix_re, err = regexp.Compile(prefix)
 	if err != nil {
 		log.Fatal("Invalid prefix regex: " + err.Error())
 	}
