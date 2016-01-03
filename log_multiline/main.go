@@ -10,14 +10,14 @@ import (
 	"strings"
 )
 
-var prefix = "^\\s+"
-var prefix_re *regexp.Regexp
+var regex = "^\\s+"
+var regex_re *regexp.Regexp
 
 func process(fh *os.File) {
 	scanner := bufio.NewScanner(fh)
 	collected := make([]string, 0, 10)
 	for scanner.Scan() {
-		if prefix_re.MatchString(scanner.Text()) {
+		if regex_re.MatchString(scanner.Text()) {
 			// The log entry is part of a multiline entry
 			collected = append(collected, scanner.Text())
 		} else {
@@ -31,16 +31,16 @@ func process(fh *os.File) {
 
 func init() {
 	log.SetFlags(0)
-	flag.StringVar(&prefix, "prefix", "\\s+",
-		"Prefix for second and successive lines of a log entry")
+	flag.StringVar(&regex, "regex", "\\s+",
+		"regex to match second and successive lines of a log entry")
 }
 
 func main() {
 	flag.Parse()
 	var err error
-	prefix_re, err = regexp.Compile(prefix)
+	regex_re, err = regexp.Compile(regex)
 	if err != nil {
-		log.Fatal("Invalid prefix regex: " + err.Error())
+		log.Fatal(err.Error())
 	}
 
 	if flag.NArg() >= 1 {
