@@ -30,6 +30,13 @@ used the instructions above.
 This command will identify similar log lines and group them together,
 replacing parts that vary with an asterisk.
 
+This can be very useful in a number of situations:
+
+* Identifying patterns in logs to be able to parse them further
+* Identifying log entries that are happening often
+* Quickly find exceptional events by looking for log entries that don't occur
+  often, filtering out the noise.
+
 By default, it runs in interactive mode, where you can view the groups and
 drill down into the individual log lines, or view the different values for
 each asterisk:
@@ -78,3 +85,9 @@ For example, if every log line is followed by another with the word 'DETAIL:'
 in it, and you want to combine them into single entries, you could run:
 
     log_multiline -regex DETAIL:
+
+## Examples
+
+Group similar postgres log lines together:
+
+    log_multiline postgresql*.log | log_group -threshold 0.6
