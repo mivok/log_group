@@ -8,7 +8,10 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+
+	selection_list "github.com/mivok/logtools/group_entries/selection_list"
 
 	ui "github.com/gizak/termui"
 )
@@ -26,14 +29,14 @@ const (
 	MODE_WILDCARD
 )
 
-type ViewState struct {
+type viewState struct {
 	mode               int
 	groups             *[][][]string
 	selected_list_item int
 	list_items         *[]string
 }
 
-var viewState = ViewState{}
+var vs = viewState{}
 
 // How similar log lines have to be for them to be grouped together. Expressed
 // as a fraction of the number of tokens (e.g. 0.8 would be 80% of tokens must
@@ -94,9 +97,9 @@ func process(fh *os.File) (groups [][][]string) {
 	return groups
 }
 
-func generateWildcards(group [][]string) []string {
-	// Takes a slice of split strings, and replaces any matching items with
-	// wildcards.
+func findDifferingTokens(group [][]string) []string {
+	// Takes a slice of split strings, and replaces any items that differ
+	// between groups with wildcards.
 	wild_pattern := make([]string, len(group[0]), len(group[0]))
 	copy(wild_pattern, group[0])
 	for _, pattern := range group {
@@ -106,6 +109,11 @@ func generateWildcards(group [][]string) []string {
 			}
 		}
 	}
+	return wild_pattern
+}
+
+func generateWildcards(group [][]string) []string {
+	wild_pattern := findDifferingTokens(group)
 	// Add token separators (punctuation/spaces) back in because we just wiped
 	// them out with asterisks before.
 	for i, v := range wild_pattern {
@@ -116,61 +124,103 @@ func generateWildcards(group [][]string) []string {
 	return wild_pattern
 }
 
+func countWildValues(group [][]string, wild_index int) []string {
+	wild_pattern := findDifferingTokens(group)
+	// Identify the token index with the nth wild entry
+	token_index := -1
+	wild_count := 0
+	for i, v := range wild_pattern {
+		if v == "*" {
+			wild_count++
+			if wild_count == wild_index {
+				token_index = i
+				break
+			}
+		}
+	}
+	if token_index == -1 {
+		// We didn't find a matching wild pattern, so return an empty list
+		return []string{}
+	}
+	// Now count the number of unique values in the matching token index
+	group_counts := make(map[string]int)
+	for _, v := range group {
+		group_counts[v[token_index]]++
+	}
+	// Reverse the mapping so we can sort by count
+	counts_group := make(map[int][]string)
+	for value, count := range group_counts {
+		counts_group[count] = append(counts_group[count], value)
+	}
+	// Sort the counts
+	counts := make([]int, 0, len(counts_group))
+	for k := range counts_group {
+		counts = append(counts, k)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(counts)))
+	// Make a list of counts -> values
+	wild_counts := make([]string, 0, len(counts_group))
+	for _, count := range counts {
+		for _, value := range counts_group[count] {
+			// Remove separators from the displayed value
+			value = separator_re.ReplaceAllString(value, "")
+			wild_counts = append(wild_counts, fmt.Sprintf(
+				"[%-5d](fg-green) %v", count, value))
+		}
+	}
+	return wild_counts
+}
+
 func renderGroup(group [][]string, color bool) string {
 	count := len(group)
 	with_wilds := generateWildcards(group)
 	if color {
-		return fmt.Sprintf("[%v](fg-green)\t%v", count,
+		return fmt.Sprintf("[%-5d](fg-green)\t%v", count,
 			strings.Join(with_wilds, ""))
 	} else {
-		return fmt.Sprintf("%v\t%v", count, strings.Join(with_wilds, ""))
+		return fmt.Sprintf("%-5d\t%v", count, strings.Join(with_wilds, ""))
 	}
 }
 
-func scroll(box *ui.List, x, y int, absolute bool) {
-	if absolute {
-		box.PaddingLeft = -x
-		box.PaddingTop = -y
-	} else {
-		box.PaddingLeft -= x
-		box.PaddingTop -= y
-	}
-	if box.PaddingTop < (box.Height - len(box.Items)) {
-		box.PaddingTop = (box.Height - len(box.Items))
-	}
-	if box.PaddingTop > 0 {
-		box.PaddingTop = 0
-	}
-	if box.PaddingLeft > 0 {
-		box.PaddingLeft = 0
-	}
-}
-
-func switchMode(newMode int, outBox *ui.List) {
-	if viewState.mode == newMode {
+func switchMode(newMode int, outBox *selection_list.SelectionList, param int) {
+	if vs.mode == newMode {
 		// Yay, nothing to do
 		return
 	}
 
 	if newMode == MODE_LIST {
-		outBox.Items = *viewState.list_items
-		scroll(outBox, 0, 0, true)
+		outBox.Items = *vs.list_items
+		outBox.EnableSelection = true
+		outBox.SelectItem(vs.selected_list_item, true)
 	}
 
-	if newMode == MODE_DETAILS && viewState.mode == MODE_LIST {
-		// TODO - we should probably keep track of the selected index
-		// elsewhere, such as in viewState.
-		selected_index := 0 - outBox.PaddingTop
-		selected_group := (*viewState.groups)[selected_index]
+	if newMode == MODE_DETAILS && vs.mode == MODE_LIST {
+		vs.selected_list_item = outBox.SelectedItem
+		selected_group := (*vs.groups)[vs.selected_list_item]
 		details := make([]string, 0, len(selected_group))
 		for _, v := range selected_group {
 			details = append(details, strings.Join(v, ""))
 		}
 		outBox.Items = details
-		scroll(outBox, 0, 0, true)
+		outBox.EnableSelection = false
+		outBox.Scroll(0, 0, true)
 	}
 
-	viewState.mode = newMode
+	if newMode == MODE_WILDCARD && vs.mode == MODE_LIST {
+		vs.selected_list_item = outBox.SelectedItem
+		selected_group := (*vs.groups)[vs.selected_list_item]
+
+		details := countWildValues(selected_group, param)
+		if len(details) == 0 {
+			// We didn't find a matching group, don't switch modes
+			return
+		}
+		outBox.Items = details
+		outBox.EnableSelection = false
+		outBox.Scroll(0, 0, true)
+	}
+
+	vs.mode = newMode
 }
 
 // Sort groups by how many log lines are in the group
@@ -216,7 +266,7 @@ func main() {
 	}
 
 	groups := process(fh)
-	viewState.groups = &groups
+	vs.groups = &groups
 	if reverse_sort || !non_interactive {
 		sort.Sort(sort.Reverse(ByLength(groups)))
 	} else {
@@ -234,13 +284,13 @@ func main() {
 			log.Fatal(err)
 		}
 		defer ui.Close()
-		outBox := ui.NewList()
+		outBox := selection_list.NewSelectionList()
 		outBox.Border = false
 		items := make([]string, 0, len(groups))
 		for _, g := range groups {
 			items = append(items, renderGroup(g, true))
 		}
-		viewState.list_items = &items
+		vs.list_items = &items
 		outBox.Items = items
 		outBox.Height = ui.TermHeight() - 2
 		helpBox := ui.NewPar("q:Quit  ^,v,<,>,pgup,pgdown,home,end:scroll  enter:details  1-9:expand wildcard")
@@ -261,66 +311,77 @@ func main() {
 
 		ui.Handle("/sys/kbd/<up>", func(ui.Event) {
 			// Scroll up
-			scroll(outBox, 0, -1, false)
+			outBox.SelectItem(-1, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<down>", func(ui.Event) {
 			// Scroll down
-			scroll(outBox, 0, 1, false)
+			outBox.SelectItem(1, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<previous>", func(ui.Event) {
 			// Scroll up quickly
-			scroll(outBox, 0, -outBox.Height, false)
+			outBox.SelectItem(-outBox.Height, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<next>", func(ui.Event) {
 			// Scroll down
-			scroll(outBox, 0, outBox.Height, false)
+			outBox.SelectItem(outBox.Height, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<left>", func(ui.Event) {
 			// Scroll left
-			scroll(outBox, -10, 0, false)
+			outBox.Scroll(-10, 0, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<right>", func(ui.Event) {
 			// Scroll right
-			scroll(outBox, 10, 0, false)
+			outBox.Scroll(10, 0, false)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<home>", func(ui.Event) {
 			// Reset current view
-			scroll(outBox, 0, 0, true)
+			// Select and scroll in case we were scrolled to the right
+			outBox.SelectItem(0, true)
+			outBox.Scroll(0, 0, true)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<end>", func(ui.Event) {
 			// Scroll to bottom
-			scroll(outBox, 0, len(outBox.Items), true)
+			outBox.SelectItem(len(outBox.Items), true)
+			outBox.Scroll(0, len(outBox.Items), true)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<escape>", func(ui.Event) {
-			switchMode(MODE_LIST, outBox)
+			switchMode(MODE_LIST, outBox, 0)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<enter>", func(ui.Event) {
-			switchMode(MODE_DETAILS, outBox)
+			switchMode(MODE_DETAILS, outBox, 0)
 			ui.Render(ui.Body)
 		})
 
-		ui.Handle("/sys/kbd/", func(ui.Event) {
+		ui.Handle("/sys/kbd/", func(e ui.Event) {
 			// Handle other keys - we're interested in 1-9 for wildcards
-			// TODO
-
+			if data, ok := e.Data.(ui.EvtKbd); ok {
+				keyStr := data.KeyStr
+				if len(keyStr) == 1 && keyStr <= "9" && keyStr >= "1" {
+					index, err := strconv.Atoi(keyStr)
+					if err == nil {
+						switchMode(MODE_WILDCARD, outBox, index)
+						ui.Render(ui.Body)
+					}
+				}
+			}
 		})
 
 		ui.Handle("/sys/wnd/resize", func(e ui.Event) {
