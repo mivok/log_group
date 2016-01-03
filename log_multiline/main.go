@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-var regex = "^\\s+"
+var regex = ""
 var regex_re *regexp.Regexp
 
 func process(fh *os.File) {
@@ -31,7 +31,7 @@ func process(fh *os.File) {
 
 func init() {
 	log.SetFlags(0)
-	flag.StringVar(&regex, "regex", "\\s+",
+	flag.StringVar(&regex, "regex", "^\\s+",
 		"regex to match second and successive lines of a log entry")
 }
 
