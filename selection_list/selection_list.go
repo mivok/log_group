@@ -15,8 +15,10 @@ import (
 
 type SelectionList struct {
 	ui.List
-	SelectedItem        int
-	EnableSelection     bool
+	SelectedItem        int // Selected item
+	ScrollY             int // First visible item
+	ScrollX             int
+	EnableSelection     bool // Is item selection active?
 	SelectedItemBgColor ui.Attribute
 	SelectedItemFgColor ui.Attribute
 }
@@ -33,20 +35,20 @@ func NewSelectionList() *SelectionList {
 
 func (l *SelectionList) Scroll(x, y int, absolute bool) {
 	if absolute {
-		l.PaddingLeft = -x
-		l.PaddingTop = -y
+		l.ScrollX = x
+		l.ScrollY = y
 	} else {
-		l.PaddingLeft -= x
-		l.PaddingTop -= y
+		l.ScrollX += x
+		l.ScrollY += y
 	}
-	if l.PaddingTop < (l.Height - len(l.Items)) {
-		l.PaddingTop = (l.Height - len(l.Items))
+	if l.ScrollY >= (len(l.Items) - l.Height) {
+		l.ScrollY = (len(l.Items) - l.Height - 1)
 	}
-	if l.PaddingTop > 0 {
-		l.PaddingTop = 0
+	if l.ScrollY < 0 {
+		l.ScrollY = 0
 	}
-	if l.PaddingLeft > 0 {
-		l.PaddingLeft = 0
+	if l.ScrollX < 0 {
+		l.ScrollX = 0
 	}
 }
 
@@ -68,27 +70,35 @@ func (l *SelectionList) SelectItem(count int, absolute bool) {
 		l.SelectedItem = 0
 	}
 	// Scroll so that the selected item is always in view
-	if l.PaddingTop < 0-l.SelectedItem {
-		l.PaddingTop = 0 - l.SelectedItem
+	if l.ScrollY > l.SelectedItem {
+		l.ScrollY = l.SelectedItem
 	}
-	if l.PaddingTop > l.Height-1-l.SelectedItem {
-		l.PaddingTop = l.Height - 1 - l.SelectedItem
+	if l.ScrollY < l.SelectedItem+1-l.Height {
+		l.ScrollY = l.SelectedItem + 1 - l.Height
 	}
 }
 
 func (l *SelectionList) Buffer() ui.Buffer {
 	buf := l.Block.Buffer()
 
-	trimItems := l.Items
+	trimItems := l.Items[l.ScrollY:]
 	if len(trimItems) > l.Block.InnerHeight() {
 		trimItems = trimItems[:l.Block.InnerHeight()]
 	}
 	for i, v := range trimItems {
 		fg := l.ItemFgColor
 		bg := l.ItemBgColor
-		if i == l.SelectedItem && l.EnableSelection {
+		if i+l.ScrollY == l.SelectedItem && l.EnableSelection {
 			fg = l.SelectedItemFgColor
 			bg = l.SelectedItemBgColor
+		}
+		if l.ScrollX > 0 {
+			// Trim the beginning of the line if we are scrolled to the right
+			if len(v) > l.ScrollX {
+				v = v[l.ScrollX:]
+			} else {
+				v = ""
+			}
 		}
 		cs := ui.DTrimTxCls(ui.DefaultTxBuilder.Build(v, fg, bg),
 			l.Block.InnerWidth())

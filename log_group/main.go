@@ -165,7 +165,7 @@ func countWildValues(group [][]string, wild_index int) []string {
 			// Remove separators from the displayed value
 			value = separator_re.ReplaceAllString(value, "")
 			wild_counts = append(wild_counts, fmt.Sprintf(
-				"[%-5d](fg-green) %v", count, value))
+				"%-5d %v", count, value))
 		}
 	}
 	return wild_counts
@@ -175,7 +175,7 @@ func renderGroup(group [][]string, color bool) string {
 	count := len(group)
 	with_wilds := generateWildcards(group)
 	if color {
-		return fmt.Sprintf("[%-5d](fg-green)\t%v", count,
+		return fmt.Sprintf("%-5d %v", count,
 			strings.Join(with_wilds, ""))
 	} else {
 		return fmt.Sprintf("%-5d\t%v", count, strings.Join(with_wilds, ""))
@@ -348,15 +348,15 @@ func main() {
 		ui.Handle("/sys/kbd/<home>", func(ui.Event) {
 			// Reset current view
 			// Select and scroll in case we were scrolled to the right
-			outBox.SelectItem(0, true)
 			outBox.Scroll(0, 0, true)
+			outBox.SelectItem(0, true)
 			ui.Render(ui.Body)
 		})
 
 		ui.Handle("/sys/kbd/<end>", func(ui.Event) {
 			// Scroll to bottom
-			outBox.SelectItem(len(outBox.Items), true)
 			outBox.Scroll(0, len(outBox.Items), true)
+			outBox.SelectItem(len(outBox.Items), true)
 			ui.Render(ui.Body)
 		})
 
