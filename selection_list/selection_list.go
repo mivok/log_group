@@ -88,10 +88,6 @@ func (l *SelectionList) Buffer() ui.Buffer {
 	for i, v := range trimItems {
 		fg := l.ItemFgColor
 		bg := l.ItemBgColor
-		if i+l.ScrollY == l.SelectedItem && l.EnableSelection {
-			fg = l.SelectedItemFgColor
-			bg = l.SelectedItemBgColor
-		}
 		if l.ScrollX > 0 {
 			// Trim the beginning of the line if we are scrolled to the right
 			if len(v) > l.ScrollX {
@@ -107,6 +103,15 @@ func (l *SelectionList) Buffer() ui.Buffer {
 			w := vv.Width()
 			buf.Set(l.Block.InnerX()+j, l.Block.InnerY()+i, vv)
 			j += w
+		}
+		if i+l.ScrollY == l.SelectedItem && l.EnableSelection {
+			// Draw selection bar
+			for x := 0; x < l.Block.InnerWidth(); x++ {
+				cell := buf.At(l.Block.InnerX()+x, l.Block.InnerY()+i)
+				cell.Fg = l.SelectedItemFgColor
+				cell.Bg = l.SelectedItemBgColor
+				buf.Set(l.Block.InnerX()+x, l.Block.InnerY()+i, cell)
+			}
 		}
 	}
 	return buf
