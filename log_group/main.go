@@ -299,7 +299,7 @@ func main() {
 		vs.list_items = &items
 		outBox.Items = items
 		outBox.Height = ui.TermHeight() - 2
-		helpBox := ui.NewPar("q:Quit  ^,v,<,>,pgup,pgdown,home,end:scroll  enter:details  1-9:expand wildcard")
+		helpBox := ui.NewPar("q:Quit  ^,v,<,>:scroll  enter:details  esc:go back 1-9:expand wildcard")
 		helpBox.Height = 2
 		helpBox.BorderRight = false
 		helpBox.BorderBottom = false
