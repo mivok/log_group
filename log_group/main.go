@@ -188,10 +188,14 @@ func switchMode(newMode int, outBox *selection_list.SelectionList, param int) {
 		return
 	}
 
+	// Grab the text builder so we can enable/disable colorizing the text
+	tb := ui.DefaultTxBuilder.(LogGroupTxBuilder)
+
 	if newMode == MODE_LIST {
 		outBox.Items = *vs.list_items
 		outBox.EnableSelection = true
 		outBox.SelectItem(vs.selected_list_item, true)
+		tb.Colorize = true
 	}
 
 	if newMode == MODE_DETAILS && vs.mode == MODE_LIST {
@@ -204,6 +208,7 @@ func switchMode(newMode int, outBox *selection_list.SelectionList, param int) {
 		outBox.Items = details
 		outBox.EnableSelection = false
 		outBox.Scroll(0, 0, true)
+		tb.Colorize = false
 	}
 
 	if newMode == MODE_WILDCARD && vs.mode == MODE_LIST {
@@ -218,6 +223,7 @@ func switchMode(newMode int, outBox *selection_list.SelectionList, param int) {
 		outBox.Items = details
 		outBox.EnableSelection = false
 		outBox.Scroll(0, 0, true)
+		tb.Colorize = true
 	}
 
 	vs.mode = newMode
