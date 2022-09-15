@@ -11,9 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mivok/logtools/selection_list"
-
-	ui "github.com/gizak/termui"
+	ui "github.com/gizak/termui/v3"
+	"github.com/gizak/termui/v3/widgets"
 )
 
 // Any text followed by a separator (symbols or whitespace)
@@ -165,7 +164,7 @@ func countWildValues(group [][]string, wild_index int) []string {
 			// Remove separators from the displayed value
 			value = separator_re.ReplaceAllString(value, "")
 			wild_counts = append(wild_counts, fmt.Sprintf(
-				"%-5d %v", count, value))
+				"[%-5d](fg:green) %v", count, value))
 		}
 	}
 	return wild_counts
@@ -175,44 +174,37 @@ func renderGroup(group [][]string, color bool) string {
 	count := len(group)
 	with_wilds := generateWildcards(group)
 	if color {
-		return fmt.Sprintf("%-5d %v", count,
-			strings.Join(with_wilds, ""))
+		return fmt.Sprintf("[%-5d](fg:green) %v", count, strings.ReplaceAll(
+			strings.Join(with_wilds, ""), "*", "[*](fg:cyan)"))
 	} else {
-		return fmt.Sprintf("%-5d\t%v", count, strings.Join(with_wilds, ""))
+		return fmt.Sprintf("%-5d %v", count, strings.Join(with_wilds, ""))
 	}
 }
 
-func switchMode(newMode int, outBox *selection_list.SelectionList, param int) {
+func switchMode(newMode int, outBox *widgets.List, param int) {
 	if vs.mode == newMode {
 		// Yay, nothing to do
 		return
 	}
 
-	// Grab the text builder so we can enable/disable colorizing the text
-	tb := ui.DefaultTxBuilder.(LogGroupTxBuilder)
-
 	if newMode == MODE_LIST {
-		outBox.Items = *vs.list_items
-		outBox.EnableSelection = true
-		outBox.SelectItem(vs.selected_list_item, true)
-		tb.Colorize = true
+		outBox.Rows = *vs.list_items
+		outBox.SelectedRow = vs.selected_list_item
 	}
 
 	if newMode == MODE_DETAILS && vs.mode == MODE_LIST {
-		vs.selected_list_item = outBox.SelectedItem
+		vs.selected_list_item = outBox.SelectedRow
 		selected_group := (*vs.groups)[vs.selected_list_item]
 		details := make([]string, 0, len(selected_group))
 		for _, v := range selected_group {
 			details = append(details, strings.Join(v, ""))
 		}
-		outBox.Items = details
-		outBox.EnableSelection = false
-		outBox.Scroll(0, 0, true)
-		tb.Colorize = false
+		outBox.Rows = details
+		outBox.ScrollTop()
 	}
 
 	if newMode == MODE_WILDCARD && vs.mode == MODE_LIST {
-		vs.selected_list_item = outBox.SelectedItem
+		vs.selected_list_item = outBox.SelectedRow
 		selected_group := (*vs.groups)[vs.selected_list_item]
 
 		details := countWildValues(selected_group, param)
@@ -220,10 +212,8 @@ func switchMode(newMode int, outBox *selection_list.SelectionList, param int) {
 			// We didn't find a matching group, don't switch modes
 			return
 		}
-		outBox.Items = details
-		outBox.EnableSelection = false
-		outBox.Scroll(0, 0, true)
-		tb.Colorize = true
+		outBox.Rows = details
+		outBox.ScrollTop()
 	}
 
 	vs.mode = newMode
@@ -258,7 +248,6 @@ func main() {
 		log.Fatal("Threshold must be between 0.0 and 1.0")
 	}
 
-	// TODO - process multiple files
 	var fh *os.File
 	var err error
 	if flag.NArg() >= 1 {
@@ -290,113 +279,78 @@ func main() {
 			log.Fatal(err)
 		}
 		defer ui.Close()
-		outBox := selection_list.NewSelectionList()
+
+		outBox := widgets.NewList()
 		outBox.Border = false
+		outBox.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorCyan)
+
 		items := make([]string, 0, len(groups))
 		for _, g := range groups {
 			items = append(items, renderGroup(g, true))
 		}
 		vs.list_items = &items
-		outBox.Items = items
-		outBox.Height = ui.TermHeight() - 2
-		helpBox := ui.NewPar("q:Quit  ^,v,<,>:scroll  enter:details  esc:go back 1-9:expand wildcard")
-		helpBox.Height = 2
-		helpBox.BorderRight = false
+
+
+		outBox.Rows = items
+		outBox.PaddingRight = 0
+		outBox.PaddingBottom = 0
+		outBox.PaddingTop = 0
+		outBox.PaddingLeft = 0
+
+		helpBox := widgets.NewParagraph()
+		helpBox.BorderTop = true
 		helpBox.BorderBottom = false
 		helpBox.BorderLeft = false
-		ui.Body.AddRows(
-			ui.NewRow(ui.NewCol(12, 0, outBox)),
-			ui.NewRow(ui.NewCol(12, 0, helpBox)))
-		ui.Body.Align()
-		ui.Render(ui.Body)
+		helpBox.BorderRight = false
+		helpBox.PaddingRight = 0
+		helpBox.PaddingBottom = 0
+		helpBox.PaddingTop = 1
+		helpBox.PaddingLeft = 0
+		helpBox.Text = "q:Quit  j,k,↑,↓:scroll  w:wrap  enter:details  esc:back  1-9:expand wildcard"
 
-		ui.Handle("/sys/kbd/q", func(ui.Event) {
-			// Quit
-			ui.StopLoop()
-		})
 
-		ui.Handle("/sys/kbd/<up>", func(ui.Event) {
-			// Scroll up
-			outBox.SelectItem(-1, false)
-			ui.Render(ui.Body)
-		})
+		termWidth, termHeight := ui.TerminalDimensions()
+		outBox.SetRect(0, 0, termWidth, termHeight - 2)
+		helpBox.SetRect(0, termHeight - 2, termWidth, termHeight)
 
-		ui.Handle("/sys/kbd/<down>", func(ui.Event) {
-			// Scroll down
-			outBox.SelectItem(1, false)
-			ui.Render(ui.Body)
-		})
+		ui.Render(outBox, helpBox)
 
-		ui.Handle("/sys/kbd/<previous>", func(ui.Event) {
-			// Scroll up quickly
-			outBox.SelectItem(-outBox.Height, false)
-			ui.Render(ui.Body)
-		})
-
-		ui.Handle("/sys/kbd/<next>", func(ui.Event) {
-			// Scroll down
-			outBox.SelectItem(outBox.Height, false)
-			ui.Render(ui.Body)
-		})
-
-		ui.Handle("/sys/kbd/<left>", func(ui.Event) {
-			// Scroll left
-			outBox.Scroll(-10, 0, false)
-			ui.Render(ui.Body)
-		})
-
-		ui.Handle("/sys/kbd/<right>", func(ui.Event) {
-			// Scroll right
-			outBox.Scroll(10, 0, false)
-			ui.Render(ui.Body)
-		})
-
-		ui.Handle("/sys/kbd/<home>", func(ui.Event) {
-			// Reset current view
-			// Select and scroll in case we were scrolled to the right
-			outBox.Scroll(0, 0, true)
-			outBox.SelectItem(0, true)
-			ui.Render(ui.Body)
-		})
-
-		ui.Handle("/sys/kbd/<end>", func(ui.Event) {
-			// Scroll to bottom
-			outBox.Scroll(0, len(outBox.Items), true)
-			outBox.SelectItem(len(outBox.Items), true)
-			ui.Render(ui.Body)
-		})
-
-		ui.Handle("/sys/kbd/<escape>", func(ui.Event) {
-			switchMode(MODE_LIST, outBox, 0)
-			ui.Render(ui.Body)
-		})
-
-		ui.Handle("/sys/kbd/<enter>", func(ui.Event) {
-			switchMode(MODE_DETAILS, outBox, 0)
-			ui.Render(ui.Body)
-		})
-
-		ui.Handle("/sys/kbd/", func(e ui.Event) {
-			// Handle other keys - we're interested in 1-9 for wildcards
-			if data, ok := e.Data.(ui.EvtKbd); ok {
-				keyStr := data.KeyStr
-				if len(keyStr) == 1 && keyStr <= "9" && keyStr >= "1" {
-					index, err := strconv.Atoi(keyStr)
-					if err == nil {
-						switchMode(MODE_WILDCARD, outBox, index)
-						ui.Render(ui.Body)
-					}
+		uiEvents := ui.PollEvents()
+		for {
+			e := <-uiEvents
+			switch e.ID {
+			case "q", "<C-c>":
+				return
+			case "j", "<Down>":
+				outBox.ScrollDown()
+			case "k", "<Up>":
+				outBox.ScrollUp()
+			case "w":
+				outBox.WrapText = !outBox.WrapText
+			case "<PageDown>":
+				outBox.ScrollPageDown()
+			case "<PageUp>":
+				outBox.ScrollPageUp()
+			case "<Home>":
+				outBox.ScrollTop()
+			case "<End>":
+				outBox.ScrollBottom()
+			case "<Escape>":
+				switchMode(MODE_LIST, outBox, 0)
+			case "<Enter>":
+				switchMode(MODE_DETAILS, outBox, 0)
+			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+				index, err := strconv.Atoi(e.ID)
+				if err == nil {
+					switchMode(MODE_WILDCARD, outBox, index)
 				}
+			case "<Resize>":
+				termWidth, termHeight := ui.TerminalDimensions()
+				outBox.SetRect(0, 0, termWidth, termHeight - 2)
+				helpBox.SetRect(0, termHeight - 2, termWidth, termHeight)
 			}
-		})
 
-		ui.Handle("/sys/wnd/resize", func(e ui.Event) {
-			ui.Body.Width = ui.TermWidth()
-			outBox.Height = ui.TermHeight() - 3
-			ui.Body.Align()
-			ui.Render(ui.Body)
-		})
-
-		ui.Loop()
+			ui.Render(outBox, helpBox)
+		}
 	}
 }
