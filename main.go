@@ -29,6 +29,22 @@ const (
 	MODE_WILDCARD
 )
 
+const helpTextLong = `Help
+====
+
+Enter: View individual log lines for the selected group
+Escape: Return to the main screen, or quit if already there
+1-9: Expand the numbered wildcard showing the values and counts of each
+
+Up, Down, Tab, Shift-Tab: Select items in the list
+PgUp, PgDown: Scroll list a page at a time
+Home, End: Go to top and bottom of the list
+Left, Right: Scroll long lines
+
+q: Quit`
+
+const helpText = "Enter: View Details, 1-9: Expand Wildcard, q: quit, ?: help"
+
 type viewState struct {
 	mode               int
 	mode_param	       int
@@ -193,6 +209,7 @@ func switchMode(list *tview.List, newMode int, param int) {
 	// The initial mode - populate the list
 	switch newMode {
 	case MODE_LIST:
+		list.SetTitle("Main")
 		list.Clear()
 		for _, i := range(*vs.listItems) {
 			list.AddItem(i, "", 0, nil)
@@ -208,11 +225,11 @@ func switchMode(list *tview.List, newMode int, param int) {
 			vs.selectedListItem = list.GetCurrentItem()
 		}
 		selected_group := (*vs.groups)[vs.selectedListItem]
+		list.SetTitle("Details")
 		list.Clear()
 		for _, v := range selected_group {
 			list.AddItem(strings.Join(v, ""), "", 0, nil)
 		}
-		// TODO - do we need to scroll to the top here?
 	case MODE_WILDCARD:
 		// Show all the values for a single wildcard entry
 		if vs.mode == MODE_LIST {
@@ -228,6 +245,7 @@ func switchMode(list *tview.List, newMode int, param int) {
 			return
 		}
 
+		list.SetTitle(fmt.Sprintf("Wildcard expansion %d", param))
 		list.Clear()
 		for _, v := range details {
 			list.AddItem(v, "", 0, nil)
@@ -300,11 +318,13 @@ func main() {
 		vs.listItems = &items
 
 		app := tview.NewApplication()
+		pages := tview.NewPages()
 
 		list := tview.NewList()
 
 		list.ShowSecondaryText(false)
 		list.SetWrapAround(false)
+		list.SetBorder(true)
 
 		// Initial mode, populate the list
 		switchMode(list, MODE_LIST, 0)
@@ -334,12 +354,33 @@ func main() {
 						switchMode(list, MODE_WILDCARD, index)
 						return nil
 					}
+				case '?':
+					pages.ShowPage("Help")
 				}
 			}
 			return event
 		})
 
-		err := app.SetRoot(list, true).EnableMouse(true).Run()
+		helpModal := tview.NewTextView()
+		helpModal.SetText(helpTextLong)
+		helpModal.SetDoneFunc(func(_ tcell.Key) {
+			pages.HidePage("Help")
+		})
+
+		help := tview.NewTextView()
+		help.SetText(helpText)
+		help.SetTextAlign(tview.AlignCenter)
+		help.SetBackgroundColor(tcell.ColorWhite)
+		help.SetTextColor(tcell.ColorBlack)
+
+		flex := tview.NewFlex().SetDirection(tview.FlexRow)
+		flex.AddItem(list, 0, 1, true)
+		flex.AddItem(help, 1, 1, false)
+
+		pages.AddPage("Main", flex, true, true)
+		pages.AddPage("Help", helpModal, true, false)
+
+		err := app.SetRoot(pages, true).EnableMouse(true).Run()
 		if err != nil {
 			panic(err)
 		}
