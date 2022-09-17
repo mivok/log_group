@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	ui "github.com/gizak/termui/v3"
-	"github.com/gizak/termui/v3/widgets"
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
 // Any text followed by a separator (symbols or whitespace)
@@ -23,16 +23,18 @@ var separator_re = regexp.MustCompile("[!\"#$%&'()*+,-./:;<=>?@[\\]\\\\^_`{|}~\t
 
 // Modes
 const (
-	MODE_LIST = iota
+	MODE_INIT = iota
+	MODE_LIST
 	MODE_DETAILS
 	MODE_WILDCARD
 )
 
 type viewState struct {
 	mode               int
+	mode_param	       int
 	groups             *[][][]string
-	selected_list_item int
-	list_items         *[]string
+	selectedListItem int
+	listItems         *[]string
 }
 
 var vs = viewState{}
@@ -99,7 +101,7 @@ func process(fh *os.File) (groups [][][]string) {
 func findDifferingTokens(group [][]string) []string {
 	// Takes a slice of split strings, and replaces any items that differ
 	// between groups with wildcards.
-	wild_pattern := make([]string, len(group[0]), len(group[0]))
+	wild_pattern := make([]string, len(group[0]))
 	copy(wild_pattern, group[0])
 	for _, pattern := range group {
 		for j, token := range pattern {
@@ -164,7 +166,7 @@ func countWildValues(group [][]string, wild_index int) []string {
 			// Remove separators from the displayed value
 			value = separator_re.ReplaceAllString(value, "")
 			wild_counts = append(wild_counts, fmt.Sprintf(
-				"[%-5d](fg:green) %v", count, value))
+				"%-5d %v", count, value))
 		}
 	}
 	return wild_counts
@@ -174,49 +176,66 @@ func renderGroup(group [][]string, color bool) string {
 	count := len(group)
 	with_wilds := generateWildcards(group)
 	if color {
-		return fmt.Sprintf("[%-5d](fg:green) %v", count, strings.ReplaceAll(
-			strings.Join(with_wilds, ""), "*", "[*](fg:cyan)"))
+		// TODO color
+		return fmt.Sprintf("%-5d %v", count, strings.ReplaceAll(
+			strings.Join(with_wilds, ""), "*", "*"))
 	} else {
 		return fmt.Sprintf("%-5d %v", count, strings.Join(with_wilds, ""))
 	}
 }
 
-func switchMode(newMode int, outBox *widgets.List, param int) {
-	if vs.mode == newMode {
-		// Yay, nothing to do
+func switchMode(list *tview.List, newMode int, param int) {
+	if vs.mode == newMode && vs.mode_param == param {
+		// We're already in the correct mode - no need to switch
 		return
 	}
 
-	if newMode == MODE_LIST {
-		outBox.Rows = *vs.list_items
-		outBox.SelectedRow = vs.selected_list_item
-	}
-
-	if newMode == MODE_DETAILS && vs.mode == MODE_LIST {
-		vs.selected_list_item = outBox.SelectedRow
-		selected_group := (*vs.groups)[vs.selected_list_item]
-		details := make([]string, 0, len(selected_group))
-		for _, v := range selected_group {
-			details = append(details, strings.Join(v, ""))
+	// The initial mode - populate the list
+	switch newMode {
+	case MODE_LIST:
+		list.Clear()
+		for _, i := range(*vs.listItems) {
+			list.AddItem(i, "", 0, nil)
 		}
-		outBox.Rows = details
-		outBox.ScrollTop()
-	}
-
-	if newMode == MODE_WILDCARD && vs.mode == MODE_LIST {
-		vs.selected_list_item = outBox.SelectedRow
-		selected_group := (*vs.groups)[vs.selected_list_item]
+		// For when we're returning to list mode. Ensure the previous item
+		// remains selected.
+		list.SetCurrentItem(vs.selectedListItem)
+	case MODE_DETAILS:
+		// Show the individual lines for each grouped item
+		if vs.mode == MODE_LIST {
+			// If we're in list mode, then we need to store what item to get
+			// details for. If not, then we already stored the item.
+			vs.selectedListItem = list.GetCurrentItem()
+		}
+		selected_group := (*vs.groups)[vs.selectedListItem]
+		list.Clear()
+		for _, v := range selected_group {
+			list.AddItem(strings.Join(v, ""), "", 0, nil)
+		}
+		// TODO - do we need to scroll to the top here?
+	case MODE_WILDCARD:
+		// Show all the values for a single wildcard entry
+		if vs.mode == MODE_LIST {
+			// If we're in list mode, then we need to store what item to expand
+			// wildcard values for. If not, then we already stored the item.
+			vs.selectedListItem = list.GetCurrentItem()
+		}
+		selected_group := (*vs.groups)[vs.selectedListItem]
 
 		details := countWildValues(selected_group, param)
 		if len(details) == 0 {
 			// We didn't find a matching group, don't switch modes
 			return
 		}
-		outBox.Rows = details
-		outBox.ScrollTop()
+
+		list.Clear()
+		for _, v := range details {
+			list.AddItem(v, "", 0, nil)
+		}
 	}
 
 	vs.mode = newMode
+	vs.mode_param = param
 }
 
 // Sort groups by how many log lines are in the group
@@ -274,83 +293,55 @@ func main() {
 			fmt.Println(renderGroup(groups[i], false))
 		}
 	} else {
-		err := ui.Init()
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer ui.Close()
-
-		outBox := widgets.NewList()
-		outBox.Border = false
-		outBox.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorCyan)
-
 		items := make([]string, 0, len(groups))
 		for _, g := range groups {
 			items = append(items, renderGroup(g, true))
 		}
-		vs.list_items = &items
+		vs.listItems = &items
 
+		app := tview.NewApplication()
 
-		outBox.Rows = items
-		outBox.PaddingRight = 0
-		outBox.PaddingBottom = 0
-		outBox.PaddingTop = 0
-		outBox.PaddingLeft = 0
+		list := tview.NewList()
 
-		helpBox := widgets.NewParagraph()
-		helpBox.BorderTop = true
-		helpBox.BorderBottom = false
-		helpBox.BorderLeft = false
-		helpBox.BorderRight = false
-		helpBox.PaddingRight = 0
-		helpBox.PaddingBottom = 0
-		helpBox.PaddingTop = 1
-		helpBox.PaddingLeft = 0
-		helpBox.Text = "q:Quit  j,k,↑,↓:scroll  w:wrap  enter:details  esc:back  1-9:expand wildcard"
+		list.ShowSecondaryText(false)
+		list.SetWrapAround(false)
 
+		// Initial mode, populate the list
+		switchMode(list, MODE_LIST, 0)
 
-		termWidth, termHeight := ui.TerminalDimensions()
-		outBox.SetRect(0, 0, termWidth, termHeight - 2)
-		helpBox.SetRect(0, termHeight - 2, termWidth, termHeight)
-
-		ui.Render(outBox, helpBox)
-
-		uiEvents := ui.PollEvents()
-		for {
-			e := <-uiEvents
-			switch e.ID {
-			case "q", "<C-c>":
-				return
-			case "j", "<Down>":
-				outBox.ScrollDown()
-			case "k", "<Up>":
-				outBox.ScrollUp()
-			case "w":
-				outBox.WrapText = !outBox.WrapText
-			case "<PageDown>":
-				outBox.ScrollPageDown()
-			case "<PageUp>":
-				outBox.ScrollPageUp()
-			case "<Home>":
-				outBox.ScrollTop()
-			case "<End>":
-				outBox.ScrollBottom()
-			case "<Escape>":
-				switchMode(MODE_LIST, outBox, 0)
-			case "<Enter>":
-				switchMode(MODE_DETAILS, outBox, 0)
-			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-				index, err := strconv.Atoi(e.ID)
-				if err == nil {
-					switchMode(MODE_WILDCARD, outBox, index)
+		list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			switch event.Key() {
+			case tcell.KeyEscape:
+				if vs.mode == MODE_LIST {
+					// Escape from the main screen should exit
+					app.Stop()
+				} else {
+					// Otherwise, return to the main screen
+					switchMode(list, MODE_LIST, 0)
 				}
-			case "<Resize>":
-				termWidth, termHeight := ui.TerminalDimensions()
-				outBox.SetRect(0, 0, termWidth, termHeight - 2)
-				helpBox.SetRect(0, termHeight - 2, termWidth, termHeight)
+				return nil
+			case tcell.KeyEnter:
+				switchMode(list, MODE_DETAILS, 0)
+				return nil
+			case tcell.KeyRune:
+				// Normal letter/number key
+				switch event.Rune() {
+				case 'q':
+					app.Stop()
+				case '1', '2', '3', '4', '5', '6', '7', '8', '9':
+					index, err := strconv.Atoi(string(event.Rune()))
+					if err == nil {
+						switchMode(list, MODE_WILDCARD, index)
+						return nil
+					}
+				}
 			}
+			return event
+		})
 
-			ui.Render(outBox, helpBox)
+		err := app.SetRoot(list, true).EnableMouse(true).Run()
+		if err != nil {
+			panic(err)
 		}
 	}
 }
