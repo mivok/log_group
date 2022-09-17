@@ -18,13 +18,13 @@ This can be very useful in a number of situations:
 
 By default, it runs in interactive mode, where you can view the groups and drill down into the individual log lines, or view the different values for each asterisk:
 
-* Up/Down/j/k/PgUp/PgDown/Home/End - Scroll and/or select log entries
+* Up/Down/PgUp/PgDown/Home/End - Scroll and/or select log entries
 * Enter - View all log entries in a given group
 * 1-9 - Expand the Nth asterisk and show what values it has in each group,
   sorted by most frequent.
 * Escape - Go back to the main group list
 * q - quit
-* w - Toggle line wrapping
+* ? - view help screen
 
 If you wish, you can also run in non-interactive mode with `-noninteractive`,
 and the list of similar log entries will be printed out along with how many
